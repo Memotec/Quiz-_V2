@@ -7,8 +7,9 @@ export interface SyncResult {
   error: string | null;
 }
 
-export async function syncQuestionsFromSheet(): Promise<SyncResult> {
-  const url = `https://docs.google.com/spreadsheets/d/1KbAVjbQuQWHxyD_Al8EbHOdPa0ROerUW/export?format=csv`;
+export async function syncQuestionsFromSheet(spreadsheetId?: string): Promise<SyncResult> {
+  const sheetId = spreadsheetId || '1KbAVjbQuQWHxyD_Al8EbHOdPa0ROerUW';
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
   
   try {
     const response = await fetch(url);

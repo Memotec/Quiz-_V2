@@ -65,3 +65,11 @@ export interface AppStats {
   passingRate: number; // percentage
   categoryCorrectRate: Record<string, { correct: number; total: number }>;
 }
+
+export interface Course {
+  id: string;
+  name: string;
+  spreadsheetId: string;
+  isCustom?: boolean;
+}
+

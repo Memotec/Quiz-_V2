@@ -13,10 +13,13 @@ import {
   LogOut,
   User,
   CloudLightning,
-  ShieldCheck
+  ShieldCheck,
+  Plus,
+  Trash,
+  FileSpreadsheet
 } from 'lucide-react';
 import { syncQuestionsFromSheet } from './utils/sync';
-import { Question, QuizMode, ExamHistoryItem, AppStats, SavedQuizSession } from './types';
+import { Question, QuizMode, ExamHistoryItem, AppStats, SavedQuizSession, Course } from './types';
 import Dashboard from './components/Dashboard';
 import QuestionBrowser from './components/QuestionBrowser';
 import QuizEngine from './components/QuizEngine';
@@ -45,6 +48,21 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+const DEFAULT_COURSES: Course[] = [
+  {
+    id: 'vccs_4g_mn',
+    name: 'VCCS 4G MN (Chuẩn)',
+    spreadsheetId: '1KbAVjbQuQWHxyD_Al8EbHOdPa0ROerUW',
+    isCustom: false
+  },
+  {
+    id: 'vccs_4g_moi',
+    name: 'Khóa Thi VCCS Mới (Spreadsheet mới)',
+    spreadsheetId: '1e6kJx1BzziQN2oOIBK_1CRAZb-M3Rqsq',
+    isCustom: false
+  }
+];
+
 export default function App() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [syncSource, setSyncSource] = useState<'google_sheets' | 'local_backup' | string>('local_backup');
@@ -52,6 +70,105 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('dashboard'); // dashboard, browser, stats
   
+  // Course Management State
+  const [courses, setCourses] = useState<Course[]>(() => {
+    try {
+      const saved = localStorage.getItem('vccs_available_courses');
+      if (saved) {
+        const parsed = JSON.parse(saved) as Course[];
+        const customOnly = parsed.filter(p => p.isCustom);
+        return [...DEFAULT_COURSES, ...customOnly];
+      }
+    } catch (e) {
+      console.warn('Lỗi phân tích vccs_available_courses:', e);
+    }
+    return DEFAULT_COURSES;
+  });
+
+  const [activeCourseId, setActiveCourseId] = useState<string>(() => {
+    return localStorage.getItem('vccs_current_course_id') || 'vccs_4g_mn';
+  });
+
+  const activeCourse = useMemo(() => {
+    return courses.find(c => c.id === activeCourseId) || courses[0];
+  }, [courses, activeCourseId]);
+
+  // Modal State for adding custom courses
+  const [showAddCourseModal, setShowAddCourseModal] = useState<boolean>(false);
+  const [newCourseName, setNewCourseName] = useState<string>('');
+  const [newCourseUrl, setNewCourseUrl] = useState<string>('');
+  const [addCourseError, setAddCourseError] = useState<string>('');
+
+  const handleAddCourse = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddCourseError('');
+    if (!newCourseName.trim()) {
+      setAddCourseError('Vui lòng nhập tên khóa thi');
+      return;
+    }
+    
+    let sheetId = newCourseUrl.trim();
+    if (sheetId.includes('/d/')) {
+      const match = sheetId.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      if (match && match[1]) {
+        sheetId = match[1];
+      } else {
+        setAddCourseError('Đường dẫn bảng tính không hợp lệ...');
+        return;
+      }
+    } else if (sheetId.includes('id=')) {
+      const match = sheetId.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+      if (match && match[1]) {
+        sheetId = match[1];
+      } else {
+        setAddCourseError('Liên kết bảng tính không hợp lệ...');
+        return;
+      }
+    }
+    
+    if (!sheetId) {
+      setAddCourseError('ID hoặc URL Trang tính không hợp lệ.');
+      return;
+    }
+
+    const nCourse: Course = {
+      id: `course-${Date.now()}`,
+      name: newCourseName.trim(),
+      spreadsheetId: sheetId,
+      isCustom: true
+    };
+
+    setCourses(prev => [...prev, nCourse]);
+    setActiveCourseId(nCourse.id);
+    
+    setNewCourseName('');
+    setNewCourseUrl('');
+    setShowAddCourseModal(false);
+  };
+
+  const handleDeleteCourse = (courseId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Bạn có chắc chắn muốn xóa khóa thi tùy chọn này?')) {
+      if (courseId === activeCourseId) {
+        setActiveCourseId('vccs_4g_mn');
+      }
+      setCourses(prev => prev.filter(c => c.id !== courseId));
+    }
+  };
+
+  // Sync courses with localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('vccs_available_courses', JSON.stringify(courses));
+    } catch (e) {
+      console.warn('Lỗi ghi vccs_available_courses:', e);
+    }
+  }, [courses]);
+
+  useEffect(() => {
+    localStorage.setItem('vccs_current_course_id', activeCourseId);
+  }, [activeCourseId]);
+
   // Firebase AUTH State
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isSyncingHistory, setIsSyncingHistory] = useState<boolean>(false);
@@ -99,14 +216,21 @@ export default function App() {
   }, [questions]);
 
   // Sync questions from Google Sheet
-  const loadQuestions = async (isManualRefresh = false) => {
+  const loadQuestions = async (isManualRefresh = false, courseId?: string) => {
     if (isManualRefresh) setIsLoading(true);
-    const result = await syncQuestionsFromSheet();
+    const targetCourseId = courseId || activeCourseId;
+    const targetCourse = courses.find(c => c.id === targetCourseId) || courses[0];
+    const result = await syncQuestionsFromSheet(targetCourse?.spreadsheetId);
     setQuestions(result.questions);
-    setSyncSource(result.source);
+    setSyncSource(result.source === 'google_sheets' ? `Google Sheets [${targetCourse?.name}]` : result.source);
     setSyncError(result.error);
     setIsLoading(false);
   };
+
+  // Load questions on change of activeCourseId (reactive loading)
+  useEffect(() => {
+    loadQuestions(true, activeCourseId);
+  }, [activeCourseId]);
 
   // Periodic background sync of questions based on global setting
   useEffect(() => {
@@ -115,16 +239,14 @@ export default function App() {
     // Periodically fetch every 3 minutes
     const interval = setInterval(() => {
       console.log('Background refreshing questions list from Google Sheets source...');
-      loadQuestions(false);
+      loadQuestions(false, activeCourseId);
     }, 3 * 60 * 1050);
 
     return () => clearInterval(interval);
-  }, [bgSyncEnabled]);
+  }, [bgSyncEnabled, activeCourseId]);
 
   // Listen for Authentication state change and fetch/sync history to/from Firestore
   useEffect(() => {
-    loadQuestions();
-
     // Check for saved quiz progress in localStorage on mount
     try {
       const stored = localStorage.getItem('vccs_active_quiz_session');
@@ -478,25 +600,60 @@ export default function App() {
       {/* Sleek Header / Navigation Navbar */}
       {!activeSession && (
         <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-100 shadow-sm" id="main-header">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
             
-            {/* Logo Heading left side */}
-            <div 
-              onClick={() => {
-                setActiveTab('dashboard');
-              }}
-              className="flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-md group-hover:scale-105 transition-transform">
-                <GraduationCap className="w-5 h-5" />
+            {/* Logo Heading left side + Course Switcher */}
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+              <div 
+                onClick={() => {
+                  setActiveTab('dashboard');
+                }}
+                className="flex items-center gap-3 cursor-pointer group"
+              >
+                <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-md group-hover:scale-105 transition-transform">
+                  <GraduationCap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h1 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-1.5 leading-none">
+                    VCCS Quiz 4G
+                  </h1>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
+                    Trắc Nghiệm Lý Thuyết
+                  </span>
+                </div>
               </div>
-              <div>
-                <h1 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-1.5 leading-none">
-                  VCCS Quiz 4G
-                </h1>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
-                  Trắc Nghiệm Lý Thuyết
-                </span>
+
+              {/* Course Selector Dropdown Pill */}
+              <div className="flex items-center gap-1.5 bg-slate-100/70 border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-sm">
+                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
+                <span className="hidden leading-none text-[9.5px] font-black uppercase text-slate-400 tracking-wide font-mono sm:inline">Khóa Thi:</span>
+                <select
+                  value={activeCourseId}
+                  onChange={(e) => setActiveCourseId(e.target.value)}
+                  className="bg-transparent border-none text-xs font-bold text-slate-700 focus:outline-none pr-1 max-w-[130px] sm:max-w-[185px] truncate cursor-pointer font-sans"
+                >
+                  {courses.map(course => (
+                    <option key={course.id} value={course.id}>
+                      {course.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setShowAddCourseModal(true)}
+                  title="Thêm khóa thi mới..."
+                  className="p-1 hover:bg-indigo-50 rounded-lg text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer ml-0.5"
+                >
+                  <Plus className="w-3.5 h-3.5 font-bold" />
+                </button>
+                {activeCourse.isCustom && (
+                  <button
+                    onClick={(e) => handleDeleteCourse(activeCourse.id, e)}
+                    title="Xóa khóa thi này"
+                    className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                  >
+                    <Trash className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -778,6 +935,76 @@ export default function App() {
           data={printData} 
           onClose={() => setPrintData(null)} 
         />
+      )}
+
+      {showAddCourseModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[999] flex items-center justify-center p-4 animate-fade-in" id="add-course-modal">
+          <div className="bg-white rounded-3xl border border-slate-100 p-6 md:p-8 max-w-md w-full shadow-2xl relative space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="text-sm md:text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
+                Thêm Khóa Thi Trắc Nghiệm Mới
+              </h3>
+              <button 
+                onClick={() => setShowAddCourseModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold transition p-1 text-sm shrink-0 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleAddCourse} className="space-y-4">
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Tên Khóa Thi / Chủ Đề:</label>
+                <input 
+                  type="text" 
+                  value={newCourseName}
+                  onChange={(e) => setNewCourseName(e.target.value)}
+                  placeholder="Ví dụ: VCCS Mới (Kỳ thi 2026), Đào Tạo Nội Bộ..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all text-slate-700"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5 font-sans">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Link hoặc ID Google Sheets mới:</label>
+                <input 
+                  type="text" 
+                  value={newCourseUrl}
+                  onChange={(e) => setNewCourseUrl(e.target.value)}
+                  placeholder="Dán URL Google Sheets hoặc ID..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all text-slate-700"
+                  required
+                />
+                <p className="text-[10px] text-slate-400 font-medium">
+                  * Hệ thống sẽ tự động bóc tách ID bảng tính của bạn để đồng bộ hóa dữ liệu.
+                </p>
+              </div>
+
+              {addCourseError && (
+                <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-xl text-xs font-medium">
+                  ⚠️ {addCourseError}
+                </div>
+              )}
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCourseModal(false)}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-heavy text-xs rounded-xl shadow-sm transition cursor-pointer"
+                >
+                  Đồng bộ & Lưu
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>
