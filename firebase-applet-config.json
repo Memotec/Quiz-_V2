@@ -3,6 +3,7 @@
   "appId": "1:444431243941:web:2753ac7cbfcab0d94f4b4c",
   "apiKey": "AIzaSyDAfGty6u1Q4jBZPlfRIeeNrHdENkW2VUk",
   "authDomain": "onyx-yarn-1cf5x.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-85491122-163f-447a-9dbe-e5aa3f122135",
   "storageBucket": "onyx-yarn-1cf5x.firebasestorage.app",
   "messagingSenderId": "444431243941",
   "measurementId": ""

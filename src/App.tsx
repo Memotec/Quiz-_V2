@@ -615,7 +615,7 @@ export default function App() {
                 </div>
                 <div>
                   <h1 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-1.5 leading-none">
-                    VCCS Quiz 4G
+                    {activeCourse?.name || 'VCCS Quiz 4G'}
                   </h1>
                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
                     Trắc Nghiệm Lý Thuyết
