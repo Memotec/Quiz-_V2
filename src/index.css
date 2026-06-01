@@ -1,0 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-indigo-50: #fdfaf4;
+  --color-indigo-100: #faf1e3;
+  --color-indigo-200: #ebd8ba;
+  --color-indigo-300: #d6b889;
+  --color-indigo-400: #c2995b;
+  --color-indigo-500: #a8793b;
+  --color-indigo-600: #a36a28; /* Warm amber-bronze */
+  --color-indigo-650: #8d561a;
+  --color-indigo-700: #8c5211; /* Warmer terracotta-amber */
+  --color-indigo-800: #71400a;
+  --color-indigo-900: #3a220c; /* Warm chocolate ground */
+  --color-indigo-950: #261607;
+
+  --color-slate-50: #faf8f5;    /* Soft clean parchment background */
+  --color-slate-100: #f2ede4;   /* Balanced warm lines */
+  --color-slate-200: #e2dac9;   /* matted border */
+  --color-slate-350: #caba9f;
+  --color-slate-400: #7e7362;   /* Text color mute */
+  --color-slate-500: #6d6251;
+  --color-slate-600: #5c5140;
+  --color-slate-700: #4a4030;
+  --color-slate-800: #2e261d;   /* Warm charcoal black */
+  --color-slate-900: #1b1510;
+  --color-slate-950: #0f0b07;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #faf7f2; /* Clean warm paper white */
+  color: #2e261c; /* Soft chocolate-charcoal black */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom CSS Print Rules for PDF Exports */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #0d1527 !important;
+  }
+  
+  /* Hide standard interactive client view containers */
+  #main-app-container {
+    display: none !important;
+  }
+  
+  /* Show and stretch the printable PDF area */
+  #print-area {
+    display: block !important;
+    visibility: visible !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: white !important;
+  }
+  
+  /* Ensure backgrounds render appropriately in print engine */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  /* Avoid broken segments in tables / cards */
+  .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  
+  /* Establish clean pagination standard margin */
+  @page {
+    size: A4;
+    margin: 15mm 15mm 20mm 15mm;
+  }
+}
+
+/* Hide report markup from the screen by default */
+#print-area {
+  display: none;
+}
+
+/* Custom scrollbars for lists */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Custom simulator overrides to handle responsive grids in narrow browser viewports */
+@media (min-width: 768px) {
+  .active-mobile-simulator #app-internal-scroller .grid {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+  
+  .active-mobile-simulator #app-internal-scroller .lg\:grid-cols-12 {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+  
+  .active-mobile-simulator #app-internal-scroller .lg\:col-span-4,
+  .active-mobile-simulator #app-internal-scroller .lg\:col-span-8 {
+    grid-column: span 1 / span 1 !important;
+  }
+
+  .active-mobile-simulator #app-internal-scroller .md\:grid-cols-2,
+  .active-mobile-simulator #app-internal-scroller .sm\:grid-cols-5,
+  .active-mobile-simulator #app-internal-scroller .md\:grid-cols-3,
+  .active-mobile-simulator #app-internal-scroller .md\:grid-cols-4,
+  .active-mobile-simulator #app-internal-scroller .lg\:grid-cols-4,
+  .active-mobile-simulator #app-internal-scroller .grid-cols-2,
+  .active-mobile-simulator #app-internal-scroller .grid-cols-3,
+  .active-mobile-simulator #app-internal-scroller .grid-cols-4 {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+  
+  .active-mobile-simulator #app-internal-scroller .sm\:grid-cols-2 {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+
+  .active-mobile-simulator #app-internal-scroller .lg\:grid-cols-5 {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+
+  .active-mobile-simulator #app-internal-scroller .sm\:grid-cols-3 {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+
+  /* Make sure header doesn't display responsive desktop-only stuff or spaces them cleanly */
+  .active-mobile-simulator #main-header .max-w-7xl {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  
+  .active-mobile-simulator #main-header nav {
+    width: 100%;
+    justify-content: space-between;
+    border-t: 1px solid var(--color-slate-100);
+    padding-top: 0.5rem;
+    margin-top: 0.25rem;
+    overflow-x: auto;
+  }
+
+  /* Force hide less critical elements specifically inside simulated menu to save height spacing */
+  .active-mobile-simulator #main-header .hidden.lg\:inline {
+    display: none !important;
+  }
+
+  .active-mobile-simulator #main-header .hidden.sm\:inline {
+    display: none !important;
+  }
+  
+  .active-mobile-simulator #main-footer .flex {
+    flex-direction: column !important;
+    text-align: center;
+  }
+  
+  /* Simplify table styling in simulator */
+  .active-mobile-simulator #app-internal-scroller table {
+    display: block;
+    overflow-x: auto;
+  }
+}

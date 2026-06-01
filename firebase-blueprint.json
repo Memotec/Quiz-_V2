@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique user ID matching request.auth.uid"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User full name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "URL to user's profile image"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the user was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the user was last updated"
+        }
+      },
+      "required": ["id", "email", "createdAt", "updatedAt"]
+    },
+    "ExamHistoryItem": {
+      "title": "ExamHistoryItem",
+      "description": "Completed quiz or exam history item representing a progress record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique history item ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Leader or user ID who completed this quiz session"
+        },
+        "date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Original formatted date-time string of the session"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["practice", "exam"],
+          "description": "Quiz Mode: practice or exam"
+        },
+        "categoryName": {
+          "type": "string",
+          "description": "The category name or comma separated list of categories or 'Tất cả'"
+        },
+        "totalQuestions": {
+          "type": "integer",
+          "description": "Total number of questions in active session"
+        },
+        "correctAnswersCount": {
+          "type": "integer",
+          "description": "Count of correctly answered questions"
+        },
+        "score": {
+          "type": "number",
+          "description": "Aggregated score scaled out of 10.0"
+        },
+        "timeSpentSeconds": {
+          "type": "integer",
+          "description": "Actual duration spent in seconds"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Whether the exam passed according to system rules"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this history record was logged in database"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "date",
+        "mode",
+        "categoryName",
+        "totalQuestions",
+        "correctAnswersCount",
+        "score",
+        "timeSpentSeconds",
+        "passed",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Store individual registered user profiles"
+    },
+    "users/{userId}/history/{historyId}": {
+      "schema": "ExamHistoryItem",
+      "description": "Store local or cloud quiz results synced under user's profile namespace"
+    }
+  }
+}

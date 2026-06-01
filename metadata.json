@@ -1,0 +1,8 @@
+{
+  "name": "Luyện thi Trắc Nghiệm Online_Ver2",
+  "description": "Ứng dụng thi trắc nghiệm trực tuyến đồng bộ từ ngân hàng câu hỏi lý thuyết VCCS 4G MN.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
