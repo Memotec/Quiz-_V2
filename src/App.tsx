@@ -16,7 +16,8 @@ import {
   ShieldCheck,
   Plus,
   Trash,
-  FileSpreadsheet
+  FileSpreadsheet,
+  XCircle
 } from 'lucide-react';
 import { syncQuestionsFromSheet } from './utils/sync';
 import { Question, QuizMode, ExamHistoryItem, AppStats, SavedQuizSession, Course } from './types';
@@ -47,6 +48,7 @@ import {
   writeBatch, 
   serverTimestamp 
 } from 'firebase/firestore';
+import { DEFAULT_CANDIDATES, DEFAULT_CANDIDATE_PASSWORD } from './data/candidates';
 
 const DEFAULT_COURSES: Course[] = [
   {
@@ -172,8 +174,25 @@ export default function App() {
     localStorage.setItem('vccs_current_course_id', activeCourseId);
   }, [activeCourseId]);
 
-  // Firebase AUTH State
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  // Firebase AUTH State & Custom Candidate State
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('vccs_custom_candidate_user');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Lỗi đọc custom candidate từ cache:', e);
+    }
+    return null;
+  });
+  
+  // Custom Candidate Login System States
+  const [loginMode, setLoginMode] = useState<'candidate' | 'other'>('candidate');
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(DEFAULT_CANDIDATES[0].id);
+  const [candidatePasswordInput, setCandidatePasswordInput] = useState<string>('');
+  const [candidateLoginError, setCandidateLoginError] = useState<string | null>(null);
+
   const [isSyncingHistory, setIsSyncingHistory] = useState<boolean>(false);
   const [bgSyncEnabled, setBgSyncEnabled] = useState<boolean>(() => {
     return localStorage.getItem('vccs_bg_sync_enabled') !== 'false';
@@ -223,6 +242,16 @@ export default function App() {
     if (questions.length === 0) return [];
     return Array.from(new Set(questions.map(q => q.category)));
   }, [questions]);
+
+  // Admin role permission check helper
+  const isUserAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    return (
+      currentUser.email === 'tailieutbtt@gmail.com' ||
+      currentUser.email === 'tranvantruong@vccs.local' ||
+      !!(currentUser as any).isAdmin
+    );
+  }, [currentUser]);
 
   // Sync questions from Google Sheet
   const loadQuestions = async (isManualRefresh = false, courseId?: string) => {
@@ -314,8 +343,9 @@ export default function App() {
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setCurrentUser(firebaseUser);
       if (firebaseUser) {
+        setCurrentUser(firebaseUser);
+        localStorage.removeItem('vccs_custom_candidate_user');
         // 1. Sync / Save user profile to Firestore `/users/{userId}`
         const userPath = `users/${firebaseUser.uid}`;
         try {
@@ -396,16 +426,41 @@ export default function App() {
           setIsSyncingHistory(false);
         }
       } else {
-        // Offline / Unauthenticated fallback
+        // No firebaseUser, check if there is a cached custom candidate user
+        let customCandidateRestored = false;
         try {
-          const stored = localStorage.getItem('vccs_quiz_history_v2');
-          if (stored) {
-            setHistory(JSON.parse(stored));
-          } else {
-            setHistory([]);
+          const cachedCustom = localStorage.getItem('vccs_custom_candidate_user');
+          if (cachedCustom) {
+            const parsed = JSON.parse(cachedCustom);
+            setCurrentUser(parsed);
+            customCandidateRestored = true;
+            
+            // Re-load candidate history from candidate-specific localStorage index
+            const candHistoryKey = `vccs_quiz_history_v2_cand_${parsed.uid}`;
+            const stored = localStorage.getItem(candHistoryKey);
+            if (stored) {
+              setHistory(JSON.parse(stored));
+            } else {
+              setHistory([]);
+            }
           }
         } catch (e) {
-          setHistory([]);
+          console.warn('Lỗi phục hồi custom candidate:', e);
+        }
+
+        if (!customCandidateRestored) {
+          setCurrentUser(null);
+          // Offline / Unauthenticated fallback
+          try {
+            const stored = localStorage.getItem('vccs_quiz_history_v2');
+            if (stored) {
+              setHistory(JSON.parse(stored));
+            } else {
+              setHistory([]);
+            }
+          } catch (e) {
+            setHistory([]);
+          }
         }
       }
     });
@@ -435,11 +490,76 @@ export default function App() {
   // Logout handler
   const handleSignOut = async () => {
     try {
-      if (confirm('Bạn có chắc chắn muốn đăng xuất tài khoản? Kết quả làm bài sẽ tiếp tục được lưu ngoại tuyến ở trình duyệt này.')) {
-        await signOut(auth);
+      if (confirm('Bạn có chắc chắn muốn đăng xuất tài khoản? Lịch sử làm bài vẫn sẽ tiếp tục được lưu trữ an toàn trong trình duyệt này.')) {
+        if (currentUser?.uid && (currentUser.uid.startsWith('cand_') || currentUser.uid === 'guest')) {
+          localStorage.removeItem('vccs_custom_candidate_user');
+          setCurrentUser(null);
+          // Restore default guest/fallback history
+          try {
+            const stored = localStorage.getItem('vccs_quiz_history_v2');
+            if (stored) {
+              setHistory(JSON.parse(stored));
+            } else {
+              setHistory([]);
+            }
+          } catch (e) {
+            setHistory([]);
+          }
+        } else {
+          await signOut(auth);
+        }
       }
     } catch (err) {
       console.error('Lỗi đăng xuất:', err);
+    }
+  };
+
+  const handleCandidateLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cand = DEFAULT_CANDIDATES.find(c => c.id === selectedCandidateId);
+    if (cand) {
+      const requiredPassword = cand.password || DEFAULT_CANDIDATE_PASSWORD;
+      if (candidatePasswordInput === requiredPassword) {
+        const fakeUser = {
+          uid: cand.id,
+          email: cand.email,
+          displayName: cand.name,
+          photoURL: null,
+          emailVerified: true,
+          isAdmin: !!cand.isAdmin
+        } as any;
+        
+        localStorage.setItem('vccs_custom_candidate_user', JSON.stringify(fakeUser));
+        setCurrentUser(fakeUser);
+        setCandidateLoginError(null);
+        setCandidatePasswordInput('');
+
+        // Load cand specific history
+        try {
+          const candHistoryKey = `vccs_quiz_history_v2_cand_${cand.id}`;
+          const stored = localStorage.getItem(candHistoryKey);
+          if (stored) {
+            setHistory(JSON.parse(stored));
+          } else {
+            setHistory([]);
+          }
+        } catch (err) {
+          setHistory([]);
+        }
+      } else {
+        const passwordHint = cand.password ? "Mật khẩu riêng cấu hình cho thí sinh này" : "tbtt@2026";
+        setCandidateLoginError(`Mật khẩu không chính xác! Vui lòng kiểm tra lại (${passwordHint}).`);
+      }
+    }
+  };
+
+  const handleCloseWindow = () => {
+    if (confirm('Bạn có chắc chắn muốn đóng trình trắc nghiệm và thoát cửa sổ thi này không?')) {
+      window.close();
+      // fallback message if browser security blocks window.close
+      setTimeout(() => {
+        alert('Do cấu hình bảo mật của trình duyệt, cửa sổ không thể tự động đóng. Vui lòng bấm dấu [X] trên tab của trình duyệt để thoát trang thi.');
+      }, 300);
     }
   };
 
@@ -454,8 +574,14 @@ export default function App() {
     const updatedHistory = [...history, freshItem];
     setHistory(updatedHistory);
     
+    const isCustomCandidate = currentUser?.uid && currentUser.uid.startsWith('cand_');
+    const storageKey = isCustomCandidate ? `vccs_quiz_history_v2_cand_${currentUser.uid}` : 'vccs_quiz_history_v2';
+
     try {
-      localStorage.setItem('vccs_quiz_history_v2', JSON.stringify(updatedHistory));
+      localStorage.setItem(storageKey, JSON.stringify(updatedHistory));
+      if (!isCustomCandidate) {
+        localStorage.setItem('vccs_quiz_history_v2', JSON.stringify(updatedHistory));
+      }
     } catch (err) {
       console.warn('Lỗi lưu lịch sử làm bài vào localStorage:', err);
     }
@@ -480,8 +606,14 @@ export default function App() {
   const handleClearHistory = async () => {
     const backupHistory = [...history];
     setHistory([]);
+    const isCustomCandidate = currentUser?.uid && currentUser.uid.startsWith('cand_');
+    const storageKey = isCustomCandidate ? `vccs_quiz_history_v2_cand_${currentUser.uid}` : 'vccs_quiz_history_v2';
+
     try {
-      localStorage.removeItem('vccs_quiz_history_v2');
+      localStorage.removeItem(storageKey);
+      if (!isCustomCandidate) {
+        localStorage.removeItem('vccs_quiz_history_v2');
+      }
       
       // Delete from Firestore
       if (auth.currentUser) {
@@ -773,7 +905,7 @@ export default function App() {
                 <span>Thống Kê</span>
               </button>
 
-              {currentUser?.email === 'tailieutbtt@gmail.com' && (
+              {isUserAdmin && (
                 <button
                   onClick={() => setActiveTab('admin_console')}
                   className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -798,7 +930,7 @@ export default function App() {
               </button>
 
               {/* Google Authentication Controller */}
-              <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200 pl-3">
+              <div className="flex items-center gap-2 ml-2 border-l border-slate-200 pl-3">
                 {currentUser ? (
                   <div className="flex items-center gap-1.5">
                     {/* User Profile Info */}
@@ -806,10 +938,17 @@ export default function App() {
                       <span className="text-[11px] font-bold text-slate-800 leading-tight truncate max-w-[124px]">
                         {currentUser.displayName || currentUser.email}
                       </span>
-                      <span className="text-[9px] text-emerald-600 font-bold flex items-center gap-0.5 leading-none justify-end">
-                        <span className="w-1 h-1 bg-emerald-500 rounded-full animate-ping" />
-                        Đồng bộ Cloud
-                      </span>
+                      {currentUser.uid === 'guest' ? (
+                        <span className="text-[9px] text-amber-600 font-bold flex items-center gap-0.5 leading-none justify-end">
+                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                          Học Ngoại Tuyến
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-emerald-600 font-bold flex items-center gap-0.5 leading-none justify-end">
+                          <span className="w-1 h-1 bg-emerald-500 rounded-full animate-ping" />
+                          Đồng bộ Cloud
+                        </span>
+                      )}
                     </div>
                     {/* User profile avatar or simple letter circle */}
                     {currentUser.photoURL ? (
@@ -828,21 +967,32 @@ export default function App() {
                     <button
                       onClick={handleSignOut}
                       title="Đăng xuất tài khoản"
-                      className="p-1.5 text-slate-400 hover:text-amber-700 rounded-lg hover:bg-amber-50/50 transition-colors cursor-pointer"
+                      className="ml-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-800 border border-slate-200 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-xs shrink-0"
                     >
-                      <LogOut className="w-3.5 h-3.5" />
+                      <LogOut className="w-3.5 h-3.5 text-slate-500" />
+                      <span className="hidden sm:inline">Đăng xuất</span>
                     </button>
                   </div>
                 ) : (
                   <button
                     onClick={handleSignIn}
-                    className="flex items-center gap-1.5 bg-[#a36a28]/10 hover:bg-[#a36a28]/2 focus:outline-none text-[#8c5211] px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-[#ebd8ba]"
+                    className="flex items-center gap-1.5 bg-[#a36a28]/10 hover:bg-[#a36a28]/20 focus:outline-none text-[#8c5211] px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-[#ebd8ba]"
                     title="Đăng nhập để tự động lưu trữ và đồng bộ kết quả lên Cloud"
                   >
                     <LogIn className="w-3.5 h-3.5" />
                     <span className="hidden lg:inline">Cloud Sync</span>
                   </button>
                 )}
+
+                {/* Close window action button */}
+                <button
+                  onClick={handleCloseWindow}
+                  title="Thoát và đóng cửa sổ thi"
+                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Đóng cửa sổ</span>
+                </button>
               </div>
             </nav>
 
@@ -888,74 +1038,159 @@ export default function App() {
             <div className="space-y-2">
               <h3 className="font-extrabold text-slate-900 text-xl tracking-tight">Hệ Thống Trắc Nghiệm Đào Tạo VCCS 4G</h3>
               <p className="text-xs text-slate-400 font-medium px-4">
-                Vui lòng kết nối tài khoản Google của bạn để xác thực vai trò học tập và kích hoạt học bạ đồng bộ đám mây
+                Vui lòng xác thực thông tin Thí sinh trong danh sách hoặc sử dụng Google để tiếp tục học tập.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left pt-2">
-              <div className="p-4 bg-[#8c5211]/5 border border-[#ebd8ba]/30 rounded-2xl space-y-2">
-                <span className="text-[10.5px] font-black text-[#8c5211] flex items-center gap-1.5 uppercase font-mono tracking-wider">
-                  <User className="w-3.5 h-3.5" />
-                  Vai trò: Thí sinh
-                </span>
-                <p className="text-[11.5px] text-slate-600 font-medium leading-relaxed">
-                  Sử dụng tài khoản Gmail cá nhân để làm bài thi tính giờ sát hạch hoặc luyện tập tự do. Hệ thống sẽ chấm điểm và lưu lịch sử bài làm.
-                </p>
-              </div>
-              
-              <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2 max-h-[150px] overflow-hidden">
-                <span className="text-[10.5px] font-black text-indigo-700 flex items-center gap-1.5 uppercase font-mono tracking-wider">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  Vai trò: Quản trị
-                </span>
-                <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
-                  Đăng nhập qua Gmail <strong className="text-indigo-950">tailieutbtt@gmail.com</strong> để cấu hình live Google Sheets & quản lý kết quả thi của học viên.
-                </p>
-              </div>
+            {/* Segment Tab Switcher */}
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+              <button 
+                type="button"
+                onClick={() => setLoginMode('candidate')}
+                className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${loginMode === 'candidate' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                <User className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Thí sinh có tên</span>
+              </button>
+              <button 
+                type="button"
+                onClick={() => setLoginMode('other')}
+                className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${loginMode === 'other' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
+                <span>Quản trị & Đăng nhập khác</span>
+              </button>
             </div>
 
-            <div className="pt-4 space-y-4">
-              {/* Beautiful IFrame Security Warning notice */}
-              <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-800 rounded-2xl text-[11px] font-medium text-left space-y-1.5 leading-relaxed">
-                <div className="flex items-center gap-2 text-amber-950 font-extrabold text-xs">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                  <span>Cách sửa lỗi khi không đăng nhập được Gmail:</span>
+            {loginMode === 'candidate' ? (
+              /* Custom Predefined Candidates Login Box */
+              <form onSubmit={handleCandidateLogin} className="space-y-4 pt-2 text-left">
+                <div className="bg-indigo-50/40 border border-indigo-100/60 p-4 rounded-2xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-1 bg-indigo-600 text-white rounded-bl-xl text-[9px] font-bold uppercase tracking-wider font-mono">
+                    Danh Sách Học Viên
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed pr-10">
+                    Chọn tên của bạn dưới danh sách học viên chính thức và nhập mật khẩu mặc định <strong className="text-indigo-950 font-bold">tbtt@2026</strong> để bắt đầu ghi nhận học bạ.
+                  </p>
                 </div>
-                <p>
-                  Nếu cửa sổ đăng nhập không mở, đó là vì trình duyệt đang chặn Popup bên trong khung xem trước (IFrame) của AI Studio.
-                </p>
-                <p className="font-bold text-slate-900">
-                  Để đăng nhập: Vui lòng bấm biểu tượng "Mở trong tab mới" (ở góc ngoài cùng góc trên bên phải màn hình preview của AI Studio) để mở rộng ứng dụng trong tab mới!
-                </p>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">
+                    Chọn Họ & Tên Thí sinh
+                  </label>
+                  <select
+                    value={selectedCandidateId}
+                    onChange={(e) => setSelectedCandidateId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 rounded-2xl px-4 py-3.5 text-sm text-slate-800 font-bold outline-none transition-all cursor-pointer"
+                  >
+                    {DEFAULT_CANDIDATES.map((cand) => (
+                      <option key={cand.id} value={cand.id}>
+                        👦 {cand.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">
+                    Mật khẩu xác thực mặc định
+                  </label>
+                  <input
+                    type="password"
+                    value={candidatePasswordInput}
+                    onChange={(e) => setCandidatePasswordInput(e.target.value)}
+                    placeholder="Nhập password mặc định (tbtt@2026)"
+                    className="w-full bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 rounded-2xl px-4 py-3.5 text-sm text-slate-800 outline-none transition-all font-semibold"
+                  />
+                </div>
+
+                {candidateLoginError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-semibold flex items-center gap-2 animate-pulse">
+                    <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>{candidateLoginError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-4 px-6 rounded-2xl border border-indigo-700 transition-all shadow-md hover:shadow-lg cursor-pointer text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Xác Nhận Đăng Nhập Trang Thi</span>
+                </button>
+                
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={handleGuestAccess}
+                    className="text-xs text-slate-400 hover:text-indigo-600 font-semibold transition-all underline decoration-dashed hover:decoration-solid"
+                  >
+                    Hoặc làm bài nhanh ẩn danh ở chế độ Khách
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* Administrative and Other Authentication Choices */
+              <div className="pt-2 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left pt-2">
+                  <div className="p-4 bg-[#8c5211]/5 border border-[#ebd8ba]/30 rounded-2xl space-y-2">
+                    <span className="text-[10.5px] font-black text-[#8c5211] flex items-center gap-1.5 uppercase font-[#8c5211] tracking-wider">
+                      <User className="w-3.5 h-3.5" />
+                      Mở rộng tự do
+                    </span>
+                    <p className="text-[11.5px] text-slate-600 font-medium leading-relaxed">
+                      Sử dụng Gmail cá nhân tùy ý để làm bài thi tính giờ sát hạch. Điểm và lịch sử sẽ được đồng bộ đám mây chuẩn.
+                    </p>
+                  </div>
+                  
+                  <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2 max-h-[150px] overflow-hidden">
+                    <span className="text-[10.5px] font-black text-indigo-700 flex items-center gap-1.5 uppercase font-[#8c5211] tracking-wider">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Phòng đào tạo/Admin
+                    </span>
+                    <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                      Đăng nhập <strong className="text-indigo-950">tailieutbtt@gmail.com</strong> để cấu hình live Google Sheets & xuất báo cáo PDF toàn khóa.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Beautiful IFrame Security Warning notice */}
+                <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-800 rounded-2xl text-[11px] font-medium text-left space-y-1.5 leading-relaxed">
+                  <div className="flex items-center gap-2 text-amber-950 font-extrabold text-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                    <span>Lỗi chặn cửa sổ khi đăng nhập Google Auth:</span>
+                  </div>
+                  <p>
+                    Nếu cửa sổ đăng nhập không thể mở rộng, vui lòng bấm biểu tượng <strong className="text-slate-900">"Mở trong tab mới"</strong> (ở góc ngoài cùng trên cùng bên phải khung xem trước của AI Studio) để chạy ứng dụng độc lập bên ngoài Sandbox.
+                  </p>
+                </div>
+
+                {/* Login Button */}
+                <button
+                  type="button"
+                  onClick={handleSignIn}
+                  className="w-full flex items-center justify-center gap-3 bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-6 rounded-2xl border border-slate-950 transition-all font-black shadow-md hover:shadow-lg cursor-pointer text-xs"
+                >
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                  </svg>
+                  <span>Chạy Liên Kết Đăng Nhập Học Viên Qua Google</span>
+                </button>
+
+                {/* Guest / Bypass Button */}
+                <button
+                  type="button"
+                  onClick={handleGuestAccess}
+                  className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-2xl border border-slate-200 transition-all font-semibold cursor-pointer text-xs"
+                  title="Bỏ qua đăng nhập để làm bài thi & luyện tập offline ngay bằng lưu trữ local"
+                >
+                  <span>Sát hạch tự do bằng tài khoản Khách</span>
+                </button>
               </div>
-
-              {/* Login Button */}
-              <button
-                onClick={handleSignIn}
-                className="w-full flex items-center justify-center gap-3 bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-6 rounded-2xl border border-slate-950 transition-all font-black shadow-md hover:shadow-lg cursor-pointer text-xs"
-              >
-                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                </svg>
-                <span>Đăng nhập nhanh bằng tài khoản Google</span>
-              </button>
-
-              {/* Guest / Bypass Button */}
-              <button
-                onClick={handleGuestAccess}
-                className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-2xl border border-slate-200 transition-all font-semibold cursor-pointer text-xs"
-                title="Bỏ qua đăng nhập để làm bài thi & luyện tập offline ngay bằng lưu trữ local"
-              >
-                <span>Học ngoại tuyến bằng tài khoản Khách</span>
-              </button>
-              
-              <p className="text-[9.5px] text-slate-400 font-medium">
-                *Tính năng tự động đồng bộ đám mây sẽ khả dụng sau khi đăng nhập Google.
-              </p>
-            </div>
+            )}
           </div>
         ) : (
           /* Main tab routers */
@@ -979,7 +1214,7 @@ export default function App() {
                   setBgSyncEnabled(enabled);
                   localStorage.setItem('vccs_bg_sync_enabled', String(enabled));
                 }}
-                isAdmin={currentUser?.email === 'tailieutbtt@gmail.com'}
+                isAdmin={isUserAdmin}
                 activeCourseId={activeCourseId}
               />
             )}
@@ -1001,7 +1236,7 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'admin_console' && currentUser?.email === 'tailieutbtt@gmail.com' && (
+            {activeTab === 'admin_console' && isUserAdmin && (
               <AdminConsole 
                 onPrintReport={setPrintData}
                 questionsCount={questions.length}
