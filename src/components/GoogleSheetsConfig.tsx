@@ -33,11 +33,13 @@ import { User } from 'firebase/auth';
 interface GoogleSheetsConfigProps {
   onSyncComplete: (questions: Question[], sourceName: string) => void;
   currentQuestionsCount: number;
+  activeCourseId?: string;
 }
 
 export default function GoogleSheetsConfig({ 
   onSyncComplete,
-  currentQuestionsCount
+  currentQuestionsCount,
+  activeCourseId
 }: GoogleSheetsConfigProps) {
   // Auth state
   const [user, setUser] = useState<User | null>(null);
@@ -54,9 +56,22 @@ export default function GoogleSheetsConfig({
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
 
   // Spreadsheet state
-  const [sheetUrlOrId, setSheetUrlOrId] = useState<string>(
-    'https://docs.google.com/spreadsheets/d/1KbAVjbQuQWHxyD_Al8EbHOdPa0ROerUW/edit'
-  );
+  const [sheetUrlOrId, setSheetUrlOrId] = useState<string>(() => {
+    if (activeCourseId === 'vccs_4g_moi') {
+      return 'https://docs.google.com/spreadsheets/d/1e6kJx1BzziQN2oOIBK_1CRAZb-M3Rqsq/edit';
+    }
+    return 'https://docs.google.com/spreadsheets/d/1KbAVjbQuQWHxyD_Al8EbHOdPa0ROerUW/edit';
+  });
+
+  // Automatically update input field when active course changes reactive style
+  useEffect(() => {
+    if (activeCourseId === 'vccs_4g_moi') {
+      setSheetUrlOrId('https://docs.google.com/spreadsheets/d/1e6kJx1BzziQN2oOIBK_1CRAZb-M3Rqsq/edit');
+    } else if (activeCourseId === 'vccs_4g_mn') {
+      setSheetUrlOrId('https://docs.google.com/spreadsheets/d/1KbAVjbQuQWHxyD_Al8EbHOdPa0ROerUW/edit');
+    }
+  }, [activeCourseId]);
+
   const [spreadsheetTitle, setSpreadsheetTitle] = useState<string | null>(null);
   const [sheetsList, setSheetsList] = useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string>('');

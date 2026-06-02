@@ -29,6 +29,7 @@ interface DashboardProps {
   bgSyncEnabled?: boolean;
   onToggleBgSync?: (enabled: boolean) => void;
   isAdmin?: boolean;
+  activeCourseId?: string;
 }
 
 export default function Dashboard({ 
@@ -46,7 +47,8 @@ export default function Dashboard({
   onClearSavedSession,
   bgSyncEnabled = true,
   onToggleBgSync,
-  isAdmin = false
+  isAdmin = false,
+  activeCourseId
 }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<QuizMode>('practice');
   const [selectedCats, setSelectedCats] = useState<string[]>(['Tất cả']);
@@ -156,9 +158,9 @@ export default function Dashboard({
         <div className="max-w-2xl space-y-4 relative z-10">
           {/* Quick status badge */}
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 rounded-full border border-white/10 backdrop-blur-md">
-            <span className={`w-2 h-2 rounded-full ${syncSource === 'google_sheets' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
-            <span className="text-[10px] font-bold font-mono tracking-wider uppercase text-indigo-200">
-              {syncSource === 'google_sheets' ? 'Đã Đồng Bộ Google Sheets' : 'Sử Dụng Dữ Liệu Dự Phòng'}
+            <span className={`w-2 h-2 rounded-full ${syncSource !== 'local_backup' ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+            <span className="text-[10px] font-bold tracking-wider uppercase text-indigo-200">
+              {syncSource !== 'local_backup' ? 'Đã Đồng Bộ Trang Tính Cloud' : 'Sử Dụng Dữ Liệu Dự Phòng'}
             </span>
           </div>
 
@@ -226,10 +228,11 @@ export default function Dashboard({
         
         {/* Left Side: Category overview Cards */}
         <div className="lg:col-span-4 space-y-4 flex flex-col">
-          {isAdmin ? (
+          {isAdmin || activeCourseId === 'vccs_4g_moi' || activeCourseId?.startsWith('custom_') ? (
             <GoogleSheetsConfig 
               onSyncComplete={onSyncComplete} 
               currentQuestionsCount={questions.length} 
+              activeCourseId={activeCourseId}
             />
           ) : (
             <div className="bg-gradient-to-br from-[#ebd8ba]/10 via-amber-50/5 to-slate-50 p-5 rounded-3xl border border-[#ebd8ba]/30 shadow-sm space-y-4" id="candidate-profile-summary-card">

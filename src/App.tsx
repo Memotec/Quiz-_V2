@@ -69,6 +69,9 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('dashboard'); // dashboard, browser, stats
+  const [lastSyncTime, setLastSyncTime] = useState<string>(() => {
+    return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  });
   
   // Course Management State
   const [courses, setCourses] = useState<Course[]>(() => {
@@ -191,6 +194,12 @@ export default function App() {
     setQuestions(newQuestions);
     setSyncSource(sourceName);
     setSyncError(null);
+    setLastSyncTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+    try {
+      localStorage.setItem(`vccs_course_questions_${activeCourseId}`, JSON.stringify(newQuestions));
+    } catch (e) {
+      console.warn('Lỗi lưu câu hỏi của khóa thi:', e);
+    }
   };
   
   // Active quiz session states
@@ -220,10 +229,57 @@ export default function App() {
     if (isManualRefresh) setIsLoading(true);
     const targetCourseId = courseId || activeCourseId;
     const targetCourse = courses.find(c => c.id === targetCourseId) || courses[0];
+
+    // Check localStorage cache first
+    let cachedQuestions: Question[] = [];
+    try {
+      const saved = localStorage.getItem(`vccs_course_questions_${targetCourseId}`);
+      if (saved) {
+        cachedQuestions = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Lỗi đọc vccs_course_questions từ cache:', e);
+    }
+
+    if (cachedQuestions.length > 0) {
+      setQuestions(cachedQuestions);
+      setSyncSource(`Bộ nhớ tạm [${targetCourse?.name || 'Custom'}]`);
+      if (!isManualRefresh) setIsLoading(false);
+    }
+
     const result = await syncQuestionsFromSheet(targetCourse?.spreadsheetId);
-    setQuestions(result.questions);
-    setSyncSource(result.source === 'google_sheets' ? `Google Sheets [${targetCourse?.name}]` : result.source);
-    setSyncError(result.error);
+    
+    if (result.source === 'google_sheets') {
+      setQuestions(result.questions);
+      setSyncSource(`Google Sheets [${targetCourse?.name || 'Custom'}]`);
+      setSyncError(null);
+      setLastSyncTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+      // Cache the newly fetched questions
+      try {
+        localStorage.setItem(`vccs_course_questions_${targetCourseId}`, JSON.stringify(result.questions));
+      } catch (e) {
+        console.warn('Lỗi ghi vccs_course_questions vào cache:', e);
+      }
+    } else {
+      // It fell back to local_backup or offline
+      if (cachedQuestions.length > 0) {
+        // Keep using cached questions!
+        setQuestions(cachedQuestions);
+        setSyncSource(`Danh sách lưu sẵn [${targetCourse?.name || 'Custom'}]`);
+        setSyncError(`Không thể tải trực tuyến mới nhất. Đang sử dụng dữ liệu đã đồng bộ sẵn của khóa thi này.`);
+        setLastSyncTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+      } else {
+        if (targetCourseId === 'vccs_4g_mn') {
+          setQuestions(result.questions);
+          setSyncSource('Dữ liệu mặc định');
+          setLastSyncTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+        } else {
+          setQuestions([]);
+          setSyncSource('Bình thường/Chưa đồng bộ');
+        }
+        setSyncError(result.error);
+      }
+    }
     setIsLoading(false);
   };
 
@@ -364,6 +420,16 @@ export default function App() {
     } catch (err) {
       console.error('Lỗi đăng nhập Google Auth:', err);
     }
+  };
+
+  const handleGuestAccess = () => {
+    setCurrentUser({
+      uid: 'guest',
+      email: 'guest@vccs.local',
+      displayName: 'Học viên (Khách)',
+      photoURL: null,
+      emailVerified: true
+    } as any);
   };
 
   // Logout handler
@@ -617,9 +683,21 @@ export default function App() {
                   <h1 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-1.5 leading-none">
                     {activeCourse?.name || 'VCCS Quiz 4G'}
                   </h1>
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
-                    Trắc Nghiệm Lý Thuyết
-                  </span>
+                  <div className="text-[10px] text-slate-400 font-semibold tracking-tight mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span className="uppercase tracking-wider font-mono font-bold text-indigo-500/90">Trắc nghiệm</span>
+                    {questions.length > 0 && (
+                      <>
+                        <span className="text-slate-300">•</span>
+                        <span className="text-slate-600 font-bold">{questions.length} câu hỏi</span>
+                      </>
+                    )}
+                    {lastSyncTime && (
+                      <>
+                        <span className="text-slate-300">•</span>
+                        <span className="font-mono text-[9px] text-slate-500 bg-slate-100 px-1 py-0.5 rounded">Cập nhật: {lastSyncTime}</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -825,23 +903,38 @@ export default function App() {
                 </p>
               </div>
               
-              <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2">
+              <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2 max-h-[150px] overflow-hidden">
                 <span className="text-[10.5px] font-black text-indigo-700 flex items-center gap-1.5 uppercase font-mono tracking-wider">
                   <ShieldCheck className="w-3.5 h-3.5" />
                   Vai trò: Quản trị
                 </span>
-                <p className="text-[11.5px] text-slate-600 font-medium leading-relaxed">
-                  Đăng nhập qua Gmail <strong className="text-indigo-900 font-bold">tailieutbtt@gmail.com</strong> để toàn quyền cấu hình live Google Sheets & lướt xem học bạ toàn bộ học sinh.
+                <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                  Đăng nhập qua Gmail <strong className="text-indigo-950">tailieutbtt@gmail.com</strong> để cấu hình live Google Sheets & quản lý kết quả thi của học viên.
                 </p>
               </div>
             </div>
 
-            <div className="pt-4 space-y-3">
+            <div className="pt-4 space-y-4">
+              {/* Beautiful IFrame Security Warning notice */}
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-800 rounded-2xl text-[11px] font-medium text-left space-y-1.5 leading-relaxed">
+                <div className="flex items-center gap-2 text-amber-950 font-extrabold text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                  <span>Cách sửa lỗi khi không đăng nhập được Gmail:</span>
+                </div>
+                <p>
+                  Nếu cửa sổ đăng nhập không mở, đó là vì trình duyệt đang chặn Popup bên trong khung xem trước (IFrame) của AI Studio.
+                </p>
+                <p className="font-bold text-slate-900">
+                  Để đăng nhập: Vui lòng bấm biểu tượng "Mở trong tab mới" (ở góc ngoài cùng góc trên bên phải màn hình preview của AI Studio) để mở rộng ứng dụng trong tab mới!
+                </p>
+              </div>
+
+              {/* Login Button */}
               <button
                 onClick={handleSignIn}
-                className="w-full flex items-center justify-center gap-3 bg-slate-905 bg-slate-900 hover:bg-slate-800 text-white font-heavy py-4 px-6 rounded-2xl border border-slate-950 transition-all shadow-md hover:shadow-lg cursor-pointer text-xs font-bold"
+                className="w-full flex items-center justify-center gap-3 bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-6 rounded-2xl border border-slate-950 transition-all font-black shadow-md hover:shadow-lg cursor-pointer text-xs"
               >
-                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4.5 h-4.5">
+                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
                   <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
                   <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
                   <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
@@ -849,9 +942,18 @@ export default function App() {
                 </svg>
                 <span>Đăng nhập nhanh bằng tài khoản Google</span>
               </button>
+
+              {/* Guest / Bypass Button */}
+              <button
+                onClick={handleGuestAccess}
+                className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-2xl border border-slate-200 transition-all font-semibold cursor-pointer text-xs"
+                title="Bỏ qua đăng nhập để làm bài thi & luyện tập offline ngay bằng lưu trữ local"
+              >
+                <span>Học ngoại tuyến bằng tài khoản Khách</span>
+              </button>
               
-              <p className="text-[10px] text-slate-400 font-medium">
-                *Hệ thống sử dụng dịch vụ Google Sign-In an toàn tuyệt đối.
+              <p className="text-[9.5px] text-slate-400 font-medium">
+                *Tính năng tự động đồng bộ đám mây sẽ khả dụng sau khi đăng nhập Google.
               </p>
             </div>
           </div>
@@ -878,6 +980,7 @@ export default function App() {
                   localStorage.setItem('vccs_bg_sync_enabled', String(enabled));
                 }}
                 isAdmin={currentUser?.email === 'tailieutbtt@gmail.com'}
+                activeCourseId={activeCourseId}
               />
             )}
             
@@ -915,7 +1018,7 @@ export default function App() {
             <div className="flex items-center gap-1.5 uppercase font-mono tracking-wider font-bold text-[10px] text-slate-400">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
               <span>Nguồn cấp dữ liệu:</span>
-              <span className="text-indigo-600">{syncSource === 'google_sheets' ? 'Google Sheets Live Cloud' : 'Bộ lưu trữ dự phòng Offline'}</span>
+              <span className="text-indigo-600 font-sans">{syncSource !== 'local_backup' ? syncSource : 'Bộ lưu trữ dự phòng Offline'}</span>
             </div>
             
             <div className="text-center md:text-right space-y-1">
