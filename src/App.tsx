@@ -77,6 +77,29 @@ export default function App() {
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => {
     return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   });
+
+  // Firebase AUTH State & Custom Candidate State
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('vccs_custom_candidate_user');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Lỗi đọc custom candidate từ cache:', e);
+    }
+    return null;
+  });
+
+  // Admin role permission check helper
+  const isUserAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    return (
+      currentUser.email === 'tailieutbtt@gmail.com' ||
+      currentUser.email === 'tranvantruong@vccs.local' ||
+      !!(currentUser as any).isAdmin
+    );
+  }, [currentUser]);
   
   // Course Management State
   const [courses, setCourses] = useState<Course[]>(() => {
@@ -110,6 +133,10 @@ export default function App() {
   const handleAddCourse = (e: React.FormEvent) => {
     e.preventDefault();
     setAddCourseError('');
+    if (!isUserAdmin) {
+      setAddCourseError('Chỉ Quản trị viên mới được quyền thêm khóa thi mới.');
+      return;
+    }
     if (!newCourseName.trim()) {
       setAddCourseError('Vui lòng nhập tên khóa thi');
       return;
@@ -156,6 +183,10 @@ export default function App() {
 
   const handleDeleteCourse = (courseId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!isUserAdmin) {
+      alert('Chỉ Quản trị viên mới được quyền xóa các khóa thi.');
+      return;
+    }
     if (confirm('Bạn có chắc chắn muốn xóa khóa thi tùy chọn này?')) {
       if (courseId === activeCourseId) {
         setActiveCourseId('vccs_4g_mn');
@@ -176,19 +207,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('vccs_current_course_id', activeCourseId);
   }, [activeCourseId]);
-
-  // Firebase AUTH State & Custom Candidate State
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => {
-    try {
-      const saved = localStorage.getItem('vccs_custom_candidate_user');
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.warn('Lỗi đọc custom candidate từ cache:', e);
-    }
-    return null;
-  });
   
   // Dynamic candidates matching Firestore / localStorage / DEFAULT_CANDIDATES
   const [candidates, setCandidates] = useState<Candidate[]>(() => {
@@ -303,16 +321,6 @@ export default function App() {
     if (questions.length === 0) return [];
     return Array.from(new Set(questions.map(q => q.category)));
   }, [questions]);
-
-  // Admin role permission check helper
-  const isUserAdmin = useMemo(() => {
-    if (!currentUser) return false;
-    return (
-      currentUser.email === 'tailieutbtt@gmail.com' ||
-      currentUser.email === 'tranvantruong@vccs.local' ||
-      !!(currentUser as any).isAdmin
-    );
-  }, [currentUser]);
 
   // Sync questions from Google Sheet
   const loadQuestions = async (isManualRefresh = false, courseId?: string) => {
@@ -1032,14 +1040,16 @@ export default function App() {
                     </option>
                   ))}
                 </select>
-                <button
-                  onClick={() => setShowAddCourseModal(true)}
-                  title="Thêm khóa thi mới..."
-                  className="p-1 hover:bg-indigo-50 rounded-lg text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer ml-0.5"
-                >
-                  <Plus className="w-3.5 h-3.5 font-bold" />
-                </button>
-                {activeCourse.isCustom && (
+                {isUserAdmin && (
+                  <button
+                    onClick={() => setShowAddCourseModal(true)}
+                    title="Thêm khóa thi mới..."
+                    className="p-1 hover:bg-indigo-50 rounded-lg text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer ml-0.5"
+                  >
+                    <Plus className="w-3.5 h-3.5 font-bold" />
+                  </button>
+                )}
+                {isUserAdmin && activeCourse.isCustom && (
                   <button
                     onClick={(e) => handleDeleteCourse(activeCourse.id, e)}
                     title="Xóa khóa thi này"
