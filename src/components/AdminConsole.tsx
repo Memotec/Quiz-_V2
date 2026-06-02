@@ -3,7 +3,7 @@ import {
   Users, Search, Award, Activity, FileText, RefreshCw, 
   AlertCircle, CheckCircle, Trash2, Calendar, Clock, 
   ShieldCheck, ArrowRight, UserCheck, TrendingUp,
-  Plus, Edit2, Check, X, ShieldAlert, KeyRound, Mail, UserPlus
+  Plus, Edit2, Check, X, ShieldAlert, KeyRound, Mail, UserPlus, Download
 } from 'lucide-react';
 import { db } from '../utils/firebase';
 import { collection, getDocs, collectionGroup, query, deleteDoc, doc, writeBatch } from 'firebase/firestore';
@@ -145,6 +145,50 @@ export default function AdminConsole({
         await onUpdateCandidates(updatedList);
       }
     }
+  };
+
+  const handleExportCandidatesToCSV = () => {
+    const list = candidates || [];
+    if (list.length === 0) {
+      alert('Không có dữ liệu thí sinh để xuất!');
+      return;
+    }
+
+    // Tiêu đề cột của CSV (UTF-8 BOM)
+    const headers = ['Mã Thí Sinh (ID)', 'Họ & Tên', 'Email / Tài khoản', 'Mật khẩu xác thực', 'Vai Trò (Admin)'];
+    
+    const csvRows = [
+      headers.join(','),
+      ...list.map(c => {
+        const escapeCSVField = (val: string) => {
+          if (val === null || val === undefined) return '';
+          let text = String(val);
+          if (text.includes(',') || text.includes('"') || text.includes('\n') || text.includes('\r')) {
+            text = `"${text.replace(/"/g, '""')}"`;
+          }
+          return text;
+        };
+
+        return [
+          escapeCSVField(c.id),
+          escapeCSVField(c.name),
+          escapeCSVField(c.email),
+          escapeCSVField(c.password || 'Mặc định (tbtt@2026)'),
+          c.isAdmin ? 'Admin' : 'Thí Sinh Thường'
+        ].join(',');
+      })
+    ];
+
+    const csvContent = '\uFEFF' + csvRows.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Danh_sach_thi_sinh_TT_${new Date().getFullYear()}_${new Date().getMonth() + 1}_${new Date().getDate()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Load all users and their respective histories from Firestore
@@ -454,21 +498,35 @@ export default function AdminConsole({
               </span>
 
               {/* Live search bar */}
-              <span className="relative w-full md:max-w-xs">
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder={
-                    activeSubTab === 'candidates' 
-                      ? 'Tìm thí sinh có tên...' 
-                      : activeSubTab === 'users'
-                      ? 'Tìm Gmail, tên...' 
-                      : 'Tìm theo Gmail, tên, chuyên đề...'
-                  }
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all text-slate-700 font-sans"
-                />
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <span className="flex items-center gap-2.5 w-full md:w-auto">
+                {activeSubTab === 'candidates' && (
+                  <button
+                    type="button"
+                    onClick={handleExportCandidatesToCSV}
+                    className="flex items-center gap-1.5 px-3.5 py-2 whitespace-nowrap bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-705 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-black transition cursor-pointer shadow-sm hover:shadow"
+                    title="Xuất danh sách thí sinh hiện tại sang file CSV"
+                    id="export-candidates-csv"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-650 text-emerald-600 animate-pulse animate-duration-1000" />
+                    <span>Xuất Danh Sách</span>
+                  </button>
+                )}
+                <span className="relative w-full md:max-w-xs">
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder={
+                      activeSubTab === 'candidates' 
+                        ? 'Tìm thí sinh có tên...' 
+                        : activeSubTab === 'users'
+                        ? 'Tìm Gmail, tên...' 
+                        : 'Tìm theo Gmail, tên, chuyên đề...'
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:bg-white transition-all text-slate-700 font-sans"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                </span>
               </span>
             </p>
 
