@@ -279,8 +279,21 @@ export default function App() {
 
   // Dynamic Viewport Mode (Responsive Desktop vs Simulated Mobile Phone Chassis)
   const [deviceMode, setDeviceMode] = useState<'responsive' | 'mobile'>(() => {
-    return (localStorage.getItem('vccs_device_mode') as 'responsive' | 'mobile') || 'mobile';
+    return (localStorage.getItem('vccs_device_mode') as 'responsive' | 'mobile') || 'responsive';
   });
+
+  const [detectedPlatform, setDetectedPlatform] = useState<string>('');
+
+  useEffect(() => {
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+    setDetectedPlatform(isMobile ? 'Thiết bị Di động' : 'Máy tính / PC');
+    
+    // Auto-select optimal viewport if the user hasn't explicitly saved a preference
+    const savedPreference = localStorage.getItem('vccs_device_mode');
+    if (!savedPreference) {
+      setDeviceMode('responsive');
+    }
+  }, []);
 
   const handleToggleDeviceMode = (mode: 'responsive' | 'mobile') => {
     setDeviceMode(mode);
@@ -415,7 +428,8 @@ export default function App() {
               name: cand.name,
               email: cand.email,
               password: cand.password || '',
-              isAdmin: !!cand.isAdmin
+              isAdmin: !!cand.isAdmin,
+              lastLogin: cand.lastLogin || ''
             });
           });
           await batch.commit();
@@ -465,7 +479,8 @@ export default function App() {
           name: cand.name,
           email: cand.email,
           password: cand.password || '',
-          isAdmin: !!cand.isAdmin
+          isAdmin: !!cand.isAdmin,
+          lastLogin: cand.lastLogin || ''
         });
       });
       await batch.commit();
@@ -706,12 +721,25 @@ export default function App() {
     }
   };
 
-  const handleCandidateLogin = (e: React.FormEvent) => {
+  const handleCandidateLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const cand = candidates.find(c => c.id === selectedCandidateId);
     if (cand) {
       const requiredPassword = cand.password || DEFAULT_CANDIDATE_PASSWORD;
       if (candidatePasswordInput === requiredPassword) {
+        const timestamp = new Date().toISOString();
+        
+        // Update candidates array with lastLogin timestamp
+        const updatedCandidates = candidates.map(c => {
+          if (c.id === cand.id) {
+            return { ...c, lastLogin: timestamp };
+          }
+          return c;
+        });
+        
+        // Save to state and db asynchronously
+        await handleUpdateCandidates(updatedCandidates);
+
         const fakeUser = {
           uid: cand.id,
           email: cand.email,
@@ -928,6 +956,11 @@ export default function App() {
           <span className="font-extrabold uppercase tracking-wider font-mono text-slate-300">
             CHẾ ĐỘ HIỂN THỊ HỆ THỐNG
           </span>
+          {detectedPlatform && (
+            <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-bold text-[9.5px]">
+              Tự động tối ưu: <strong className="text-indigo-300">{detectedPlatform}</strong>
+            </span>
+          )}
         </div>
         <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
           <button

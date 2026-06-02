@@ -621,6 +621,7 @@ export default function AdminConsole({
                           <th className="p-4">Email / Tài khoản</th>
                           <th className="p-4">Mật khẩu xác thực</th>
                           <th className="p-4">Nhóm quyền hạn</th>
+                          <th className="p-4 text-emerald-800">Lần đăng nhập cuối</th>
                           <th className="p-4 text-right pr-6">Hành động</th>
                         </tr>
                       </thead>
@@ -700,6 +701,16 @@ export default function AdminConsole({
                                   <span className={`inline-flex items-center gap-1 font-extrabold ${c.isAdmin ? 'text-amber-700' : 'text-slate-400'}`}>
                                     {c.isAdmin ? 'Quản Trị (Admin)' : 'Thí Sinh Thường'}
                                   </span>
+                                )}
+                              </td>
+                              <td className="p-4 font-bold text-slate-600 font-mono">
+                                {c.lastLogin ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-lg text-[10px] font-black border border-emerald-100">
+                                    <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                                    {formatDate(c.lastLogin)}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 italic font-medium">Chưa có dữ liệu</span>
                                 )}
                               </td>
                               <td className="p-4 text-right pr-6 whitespace-nowrap">

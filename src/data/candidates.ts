@@ -4,6 +4,7 @@ export interface Candidate {
   email: string;
   password?: string;
   isAdmin?: boolean;
+  lastLogin?: string;
 }
 
 export const DEFAULT_CANDIDATES: Candidate[] = [
