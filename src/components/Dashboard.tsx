@@ -165,7 +165,7 @@ export default function Dashboard({
           </div>
 
           <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-            Hệ Thống Luyện Thi Lý Thuyết VCCS 4G
+            Hệ thống ôn luyện thi Trắc Nghiệm Đội TT
           </h2>
           <p className="text-xs md:text-sm text-indigo-150 leading-relaxed max-w-xl">
             Tối ưu hóa kiến thức về TCP/IP, Cấu hình, Khai thác đầu cuối CWP và Phần cứng thông qua các chế độ luyện tập thông minh và thi thử chuẩn cấu trúc.

@@ -303,7 +303,7 @@ export default function AdminConsole({
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-black tracking-tight flex items-center gap-2">
-              Bảng Điều Khiển Hệ Thống VCCS 4G
+              Bảng Điều Khiển Hệ Thống Đội TT
             </h2>
             <p className="text-xs text-indigo-150 leading-relaxed max-w-xl">
               Giám sát chất lượng ôn luyện, tra cứu điểm thi thật, thống kê hiệu suất học viên chuẩn hóa thời gian thực.

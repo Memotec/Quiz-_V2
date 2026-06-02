@@ -17,7 +17,8 @@ import {
   Plus,
   Trash,
   FileSpreadsheet,
-  XCircle
+  XCircle,
+  ExternalLink
 } from 'lucide-react';
 import { syncQuestionsFromSheet } from './utils/sync';
 import { Question, QuizMode, ExamHistoryItem, AppStats, SavedQuizSession, Course } from './types';
@@ -37,6 +38,8 @@ import {
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut, 
   User as FirebaseUser 
 } from 'firebase/auth';
@@ -210,6 +213,36 @@ export default function App() {
   });
   const [candidatePasswordInput, setCandidatePasswordInput] = useState<string>('');
   const [candidateLoginError, setCandidateLoginError] = useState<string | null>(null);
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [googleAuthLoading, setGoogleAuthLoading] = useState<boolean>(false);
+
+  const processAuthError = (err: any): string => {
+    if (!err) return 'Lỗi xác thực không xác định.';
+    const code = err.code || '';
+    const message = err.message || '';
+    
+    if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain') || message.includes('unauthorized domain')) {
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'Đang tải...';
+      return `LỖI MIỀN CHƯA ĐƯỢC ỦY QUYỀN (unauthorized-domain):\n\n` +
+        `Tên miền hiện tại [ ${currentHost} ] chưa được khai báo chấp thuận trong bảng điều khiển Firebase Console của bạn.\n\n` +
+        `👉 Cách khắc phục:\n` +
+        `1. Truy cập trang quản trị Firebase Console của bạn.\n` +
+        `2. Đi tới mục: Authentication -> Settings (Cài đặt) -> Authorized domains (Miền được ủy quyền).\n` +
+        `3. Nhấp "Thêm miền" (Add Domain) và dán chính xác tên miền này vào danh sách:\n` +
+        `   📍 ${currentHost}\n` +
+        `4. Lưu lại cấu hình và tải lại trang này để đăng nhập qua Google Auth thành công!`;
+    }
+    
+    if (code === 'auth/popup-blocked') {
+      return 'Cửa sổ đăng nhập pop-up đã bị trình duyệt chặn (popup-blocked). Vui lòng cấp quyền mở pop-up cho trang này hoặc sử dụng nút "Đăng nhập Redirect" bên dưới.';
+    }
+    
+    if (code === 'auth/cancelled-popup-request') {
+      return 'Yêu cầu đăng nhập đã bị hủy do cửa sổ popup bị đóng trước khi hoàn tất.';
+    }
+
+    return message || err.toString();
+  };
 
   // Set default candidate selection when list changes
   useEffect(() => {
@@ -433,6 +466,28 @@ export default function App() {
     }
   };
 
+  // Handle Firebase Auth Google Redirect results on boot
+  useEffect(() => {
+    setGoogleAuthLoading(true);
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          console.log('Đăng nhập qua Redirect thành công:', result.user);
+          setCurrentUser(result.user);
+          localStorage.removeItem('vccs_custom_candidate_user');
+        }
+      })
+      .catch((error: any) => {
+        console.error('Lỗi nhận kết quả từ Redirect:', error);
+        if (error && error.code !== 'auth/popup-closed') {
+          setGoogleAuthError(processAuthError(error));
+        }
+      })
+      .finally(() => {
+        setGoogleAuthLoading(false);
+      });
+  }, []);
+
   // Listen for Authentication state change and fetch/sync history to/from Firestore
   useEffect(() => {
     // Check for saved quiz progress in localStorage on mount
@@ -573,10 +628,38 @@ export default function App() {
 
   // Login handler
   const handleSignIn = async () => {
+    setGoogleAuthError(null);
+    setGoogleAuthLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Lỗi đăng nhập Google Auth:', err);
+      // Check if popup blocked or cancelled
+      if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/cancelled-popup-request' || err?.message?.toLowerCase().includes('popup')) {
+        setGoogleAuthError('Cửa sổ Pop-up đã bị chặn bởi sandbox iframe. Đang chuyển cấu hình sang đăng nhập Chuyển hướng trang (Redirect)...');
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirErr: any) {
+          console.error('Lỗi Chuyển Hướng Google Auth:', redirErr);
+          setGoogleAuthError(processAuthError(redirErr));
+          setGoogleAuthLoading(false);
+        }
+      } else {
+        setGoogleAuthError(processAuthError(err));
+        setGoogleAuthLoading(false);
+      }
+    }
+  };
+
+  const handleSignInRedirectOnly = async () => {
+    setGoogleAuthError(null);
+    setGoogleAuthLoading(true);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err: any) {
+      console.error('Lỗi đăng nhập Redirect:', err);
+      setGoogleAuthError(processAuthError(err));
+      setGoogleAuthLoading(false);
     }
   };
 
@@ -1137,7 +1220,7 @@ export default function App() {
             </div>
             
             <div className="space-y-2">
-              <h3 className="font-extrabold text-slate-900 text-xl tracking-tight">Hệ Thống Trắc Nghiệm Đào Tạo VCCS 4G</h3>
+              <h3 className="font-extrabold text-slate-900 text-xl tracking-tight">Hệ thống ôn luyện thi Trắc Nghiệm Đội TT</h3>
               <p className="text-xs text-slate-400 font-medium px-4">
                 Vui lòng xác thực thông tin Thí sinh trong danh sách hoặc sử dụng Google để tiếp tục học tập.
               </p>
@@ -1245,7 +1328,7 @@ export default function App() {
                   </div>
                   
                   <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2 max-h-[150px] overflow-hidden">
-                    <span className="text-[10.5px] font-black text-indigo-700 flex items-center gap-1.5 uppercase font-[#8c5211] tracking-wider">
+                    <span className="text-[10.5px] font-black text-indigo-700 flex items-center gap-1.5 uppercase tracking-wider">
                       <ShieldCheck className="w-3.5 h-3.5" />
                       Phòng đào tạo/Admin
                     </span>
@@ -1256,21 +1339,53 @@ export default function App() {
                 </div>
 
                 {/* Beautiful IFrame Security Warning notice */}
-                <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-800 rounded-2xl text-[11px] font-medium text-left space-y-1.5 leading-relaxed">
+                <div className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-800 rounded-2xl text-[11px] font-medium text-left space-y-2.5 leading-relaxed">
                   <div className="flex items-center gap-2 text-amber-950 font-extrabold text-xs">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                    <span>Lỗi chặn cửa sổ khi đăng nhập Google Auth:</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping h-2 w-2" />
+                    <span>LỖI CHẶN CỬA SỔ POP-UP GOOGLE AUTH:</span>
                   </div>
                   <p>
-                    Nếu cửa sổ đăng nhập không thể mở rộng, vui lòng bấm biểu tượng <strong className="text-slate-900">"Mở trong tab mới"</strong> (ở góc ngoài cùng trên cùng bên phải khung xem trước của AI Studio) để chạy ứng dụng độc lập bên ngoài Sandbox.
+                    Vị trí xem trước (Sandbox Iframe) của AI Studio có chính sách bảo mật mặc định chặn mở cửa sổ mới. Để xử lý triệt để hãy bấm nút dưới đây để chạy app trong tab độc lập:
                   </p>
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <a
+                      href={typeof window !== 'undefined' ? window.location.href : '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-extrabold py-2.5 px-3 rounded-xl border border-amber-700 transition-all text-[11px] shadow-sm cursor-pointer whitespace-nowrap text-center"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 outline-none" />
+                      <span>Khắc phục nhanh: Mở Tab mới</span>
+                    </a>
+                    
+                    <button
+                      type="button"
+                      onClick={handleSignInRedirectOnly}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 active:scale-95 text-indigo-700 font-extrabold py-2.5 px-3 rounded-xl border border-indigo-200 transition-all text-[11px] shadow-sm cursor-pointer"
+                    >
+                      <span>Đăng nhập Redirect</span>
+                    </button>
+                  </div>
                 </div>
+
+                {googleAuthError && (
+                  <div className="p-4 bg-rose-50 border border-rose-200 text-rose-905 rounded-2xl text-[12px] font-bold flex flex-col gap-2.5 text-left shadow-inner">
+                    <div className="flex items-center gap-1.5 font-extrabold text-rose-950 text-xs">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                      <span>Thông tin kiểm tra & Hướng dẫn xử lý:</span>
+                    </div>
+                    <div className="text-slate-800 font-semibold leading-relaxed font-sans whitespace-pre-line bg-white/60 p-3 rounded-xl border border-rose-100 select-all">
+                      {googleAuthError}
+                    </div>
+                  </div>
+                )}
 
                 {/* Login Button */}
                 <button
                   type="button"
+                  disabled={googleAuthLoading}
                   onClick={handleSignIn}
-                  className="w-full flex items-center justify-center gap-3 bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-6 rounded-2xl border border-slate-950 transition-all font-black shadow-md hover:shadow-lg cursor-pointer text-xs"
+                  className={`w-full flex items-center justify-center gap-3 bg-slate-900 hover:bg-slate-800 text-white py-3.5 px-6 rounded-2xl border border-slate-950 transition-all font-black shadow-md hover:shadow-lg cursor-pointer text-xs ${googleAuthLoading ? 'opacity-70 cursor-not-allowed animate-pulse' : ''}`}
                 >
                   <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
                     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
@@ -1278,14 +1393,14 @@ export default function App() {
                     <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
                     <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
                   </svg>
-                  <span>Chạy Liên Kết Đăng Nhập Học Viên Qua Google</span>
+                  <span>{googleAuthLoading ? 'Đang kết nối để xác thực...' : 'Chạy Liên Kết Đăng Nhập Học Viên Qua Google'}</span>
                 </button>
 
                 {/* Guest / Bypass Button */}
                 <button
                   type="button"
                   onClick={handleGuestAccess}
-                  className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-2xl border border-slate-200 transition-all font-semibold cursor-pointer text-xs"
+                  className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 px-6 rounded-2xl border border-slate-200 transition-all font-extrabold cursor-pointer text-xs"
                   title="Bỏ qua đăng nhập để làm bài thi & luyện tập offline ngay bằng lưu trữ local"
                 >
                   <span>Sát hạch tự do bằng tài khoản Khách</span>
@@ -1360,7 +1475,7 @@ export default function App() {
             </div>
             
             <div className="text-center md:text-right space-y-1">
-              <p>© {new Date().getFullYear()} - Hệ Thống Trắc Nghiệm Đào Tạo Công Nghệ VCCS 4G.</p>
+              <p>© {new Date().getFullYear()} - Hệ thống ôn luyện thi Trắc Nghiệm Đội TT.</p>
               <p className="text-[10px] text-slate-300">Thiết kế tinh tế theo phong cách Swiss UI • Chạy ổn định ngoại tuyến.</p>
             </div>
           </div>
