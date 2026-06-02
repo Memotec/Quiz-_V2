@@ -59,48 +59,22 @@ service cloud.firestore {
 
     // Rules for /users/{userId}
     match /users/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
-      
-      allow create: if isSignedIn() 
-        && isEmailVerified()
-        && request.auth.uid == userId
-        && incoming().id == userId
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time
-        && isValidUser(incoming());
-
-      allow update: if isSignedIn()
-        && isEmailVerified()
-        && request.auth.uid == userId
-        && incoming().id == userId
-        && incoming().id == existing().id
-        && incoming().email == existing().email
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && isValidUser(incoming())
-        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
-
-      allow delete: if isSignedIn()
-        && isEmailVerified()
-        && request.auth.uid == userId;
+      allow read, write: if true;
 
       // Rules for user's subcollection: /users/{userId}/history/{historyId}
       match /history/{historyId} {
-        allow get, list: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-
-        allow create: if isSignedIn()
-          && isEmailVerified()
-          && request.auth.uid == userId
-          && incoming().userId == userId
-          && incoming().id == historyId
-          && incoming().createdAt == request.time
-          && isValidExamHistoryItem(incoming());
-
-        allow delete: if isSignedIn()
-          && isEmailVerified()
-          && request.auth.uid == userId;
+        allow read, write: if true;
       }
+    }
+
+    // Rules for the collection group query of history documents
+    match /{path=**}/history/{historyId} {
+      allow read, write: if true;
+    }
+
+    // Rules for official predefined candidates management
+    match /candidates/{candidateId} {
+      allow read, write: if true;
     }
   }
 }

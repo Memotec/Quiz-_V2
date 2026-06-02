@@ -100,6 +100,34 @@
         "passed",
         "createdAt"
       ]
+    },
+    "Candidate": {
+      "title": "Candidate",
+      "description": "Official predefined training candidate profile details",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique custom candidate identifier starts with cand_"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the candidate"
+        },
+        "email": {
+          "type": "string",
+          "description": "Candidate email address / fake training domain"
+        },
+        "password": {
+          "type": "string",
+          "description": "Individual candidate custom passcode or empty to inherit system default"
+        },
+        "isAdmin": {
+          "type": "boolean",
+          "description": "Whether this custom candidate has system-wide admin privileges"
+        }
+      },
+      "required": ["id", "name", "email"]
     }
   },
   "firestore": {
@@ -110,6 +138,10 @@
     "users/{userId}/history/{historyId}": {
       "schema": "ExamHistoryItem",
       "description": "Store local or cloud quiz results synced under user's profile namespace"
+    },
+    "candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "Manage the official list of candidates eligible to sign in statically"
     }
   }
 }

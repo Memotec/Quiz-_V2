@@ -48,7 +48,7 @@ import {
   writeBatch, 
   serverTimestamp 
 } from 'firebase/firestore';
-import { DEFAULT_CANDIDATES, DEFAULT_CANDIDATE_PASSWORD } from './data/candidates';
+import { DEFAULT_CANDIDATES, DEFAULT_CANDIDATE_PASSWORD, Candidate } from './data/candidates';
 
 const DEFAULT_COURSES: Course[] = [
   {
@@ -187,11 +187,39 @@ export default function App() {
     return null;
   });
   
+  // Dynamic candidates matching Firestore / localStorage / DEFAULT_CANDIDATES
+  const [candidates, setCandidates] = useState<Candidate[]>(() => {
+    try {
+      const cached = localStorage.getItem('vccs_custom_candidates');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return DEFAULT_CANDIDATES;
+  });
+
   // Custom Candidate Login System States
   const [loginMode, setLoginMode] = useState<'candidate' | 'other'>('candidate');
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(DEFAULT_CANDIDATES[0].id);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>(() => {
+    try {
+      const cached = localStorage.getItem('vccs_custom_candidates');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.length > 0) return parsed[0].id;
+      }
+    } catch (e) {}
+    return DEFAULT_CANDIDATES[0].id;
+  });
   const [candidatePasswordInput, setCandidatePasswordInput] = useState<string>('');
   const [candidateLoginError, setCandidateLoginError] = useState<string | null>(null);
+
+  // Set default candidate selection when list changes
+  useEffect(() => {
+    if (candidates && candidates.length > 0) {
+      const activeExists = candidates.some(c => c.id === selectedCandidateId);
+      if (!activeExists) {
+        setSelectedCandidateId(candidates[0].id);
+      }
+    }
+  }, [candidates, selectedCandidateId]);
 
   const [isSyncingHistory, setIsSyncingHistory] = useState<boolean>(false);
   const [bgSyncEnabled, setBgSyncEnabled] = useState<boolean>(() => {
@@ -329,6 +357,81 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [bgSyncEnabled, activeCourseId]);
+
+  // Sync candidate list from Firestore, self-seed if missing
+  useEffect(() => {
+    const syncCandidates = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, 'candidates'));
+        if (querySnapshot.empty) {
+          // Firestore is empty for candidates. Seed it with initial DEFAULT_CANDIDATES
+          console.log('Seeding initial candidates into database...');
+          const batch = writeBatch(db);
+          DEFAULT_CANDIDATES.forEach((cand) => {
+            const candDoc = doc(db, 'candidates', cand.id);
+            batch.set(candDoc, {
+              id: cand.id,
+              name: cand.name,
+              email: cand.email,
+              password: cand.password || '',
+              isAdmin: !!cand.isAdmin
+            });
+          });
+          await batch.commit();
+          setCandidates(DEFAULT_CANDIDATES);
+          localStorage.setItem('vccs_custom_candidates', JSON.stringify(DEFAULT_CANDIDATES));
+        } else {
+          // Load candidates from Firestore
+          const list: Candidate[] = [];
+          querySnapshot.forEach((doc) => {
+            list.push(doc.data() as Candidate);
+          });
+          // Sort cand_ id nicely
+          list.sort((a, b) => {
+            const numA = parseInt(a.id.replace('cand_', ''), 10) || 0;
+            const numB = parseInt(b.id.replace('cand_', ''), 10) || 0;
+            return numA - numB;
+          });
+          setCandidates(list);
+          localStorage.setItem('vccs_custom_candidates', JSON.stringify(list));
+        }
+      } catch (err) {
+        console.error('Lỗi khi tải danh sách thí sinh từ Firestore, dùng dữ liệu có sẵn:', err);
+      }
+    };
+    syncCandidates();
+  }, []);
+
+  const handleUpdateCandidates = async (newCandidates: Candidate[]) => {
+    setCandidates(newCandidates);
+    localStorage.setItem('vccs_custom_candidates', JSON.stringify(newCandidates));
+    
+    try {
+      const batch = writeBatch(db);
+      // Clean up deleted ones first
+      const existingSnap = await getDocs(collection(db, 'candidates'));
+      existingSnap.forEach((docSnap) => {
+        if (!newCandidates.some(c => c.id === docSnap.id)) {
+          batch.delete(docSnap.ref);
+        }
+      });
+      
+      // Write/update current ones
+      newCandidates.forEach((cand) => {
+        const candDoc = doc(db, 'candidates', cand.id);
+        batch.set(candDoc, {
+          id: cand.id,
+          name: cand.name,
+          email: cand.email,
+          password: cand.password || '',
+          isAdmin: !!cand.isAdmin
+        });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error('Lỗi khi đồng bộ cập nhật ứng viên lên Firestore:', err);
+    }
+  };
 
   // Listen for Authentication state change and fetch/sync history to/from Firestore
   useEffect(() => {
@@ -490,24 +593,22 @@ export default function App() {
   // Logout handler
   const handleSignOut = async () => {
     try {
-      if (confirm('Bạn có chắc chắn muốn đăng xuất tài khoản? Lịch sử làm bài vẫn sẽ tiếp tục được lưu trữ an toàn trong trình duyệt này.')) {
-        if (currentUser?.uid && (currentUser.uid.startsWith('cand_') || currentUser.uid === 'guest')) {
-          localStorage.removeItem('vccs_custom_candidate_user');
-          setCurrentUser(null);
-          // Restore default guest/fallback history
-          try {
-            const stored = localStorage.getItem('vccs_quiz_history_v2');
-            if (stored) {
-              setHistory(JSON.parse(stored));
-            } else {
-              setHistory([]);
-            }
-          } catch (e) {
+      if (currentUser?.uid && (currentUser.uid.startsWith('cand_') || currentUser.uid === 'guest')) {
+        localStorage.removeItem('vccs_custom_candidate_user');
+        setCurrentUser(null);
+        // Restore default guest/fallback history
+        try {
+          const stored = localStorage.getItem('vccs_quiz_history_v2');
+          if (stored) {
+            setHistory(JSON.parse(stored));
+          } else {
             setHistory([]);
           }
-        } else {
-          await signOut(auth);
+        } catch (e) {
+          setHistory([]);
         }
+      } else {
+        await signOut(auth);
       }
     } catch (err) {
       console.error('Lỗi đăng xuất:', err);
@@ -516,7 +617,7 @@ export default function App() {
 
   const handleCandidateLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const cand = DEFAULT_CANDIDATES.find(c => c.id === selectedCandidateId);
+    const cand = candidates.find(c => c.id === selectedCandidateId);
     if (cand) {
       const requiredPassword = cand.password || DEFAULT_CANDIDATE_PASSWORD;
       if (candidatePasswordInput === requiredPassword) {
@@ -1083,7 +1184,7 @@ export default function App() {
                     onChange={(e) => setSelectedCandidateId(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 rounded-2xl px-4 py-3.5 text-sm text-slate-800 font-bold outline-none transition-all cursor-pointer"
                   >
-                    {DEFAULT_CANDIDATES.map((cand) => (
+                    {candidates.map((cand) => (
                       <option key={cand.id} value={cand.id}>
                         👦 {cand.name}
                       </option>
@@ -1240,6 +1341,8 @@ export default function App() {
               <AdminConsole 
                 onPrintReport={setPrintData}
                 questionsCount={questions.length}
+                candidates={candidates}
+                onUpdateCandidates={handleUpdateCandidates}
               />
             )}
           </div>
